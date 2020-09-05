@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "cptl.h"
+#include "ctpl.h"
 
 #ifndef LOG_DEBUG
 #include <iostream>
@@ -29,7 +29,8 @@
 
 namespace ww {
 
-template <typename K, typename V> using CacheType = std::unordered_map<K, V>;
+template <typename K, typename V>
+using CacheType = std::unordered_map<K, V>;
 
 template <typename K, typename V>
 using SerializeFunc = std::function<int(const std::unordered_map<K, V> &)>;
@@ -41,7 +42,7 @@ using DeserializeFunc = std::function<int(const std::string &)>;
 using QuickDeserializeFunc = std::function<int()>;
 using WriteTaskFunc = std::function<int()>;
 
-using ThreadPool = cptl::thread_pool;
+using ThreadPool = ctpl::thread_pool;
 
 int DoWriteTask(WriteTaskFunc write_task_func, const std::string &file_name);
 
@@ -55,8 +56,8 @@ int ConcurrentWarmup(DeserializeFunc deserialize_func,
 int ConcurrentWarmup(QuickDeserializeFunc deserialize_func,
                      const std::string &file_name, int thread_cnt = 0);
 
-int Write(const void *buf, size_t bytes, bool immediate = false);
-int Read(void *target, size_t bytes);
+int WriteToBuf(const void *buf, size_t bytes, bool immediate = false);
+int ReadFromBuf(void *target, size_t bytes);
 
 template <typename K, typename V>
 std::vector<CacheType<K, V>> SplitUnMap(const CacheType<K, V> &un_map, int n) {
@@ -93,7 +94,7 @@ int ConcurrentDump(const CacheType<K, V> &dest_map,
                    SerializeFunc<K, V> serialize_func,
                    const std::string &file_name, int thread_cnt) {
   if (thread_cnt <= 0) {
-    thread_cnt = std::thread::hardware_concurrency();
+    thread_cnt = 2 * std::thread::hardware_concurrency();
   }
   if (thread_cnt > 100) {
     thread_cnt = 100;
@@ -108,8 +109,8 @@ int ConcurrentDump(const CacheType<K, V> &dest_map,
     auto write_task_func = [&, serialize_func, cache]() {
       return serialize_func(cache);
     };
-    futures.emplace_back(thread_pool.enqueue(&DoWriteTask, write_task_func,
-                                             file_name + std::to_string(i++)));
+    futures.emplace_back(thread_pool.push(&DoWriteTask, write_task_func,
+                                          file_name + std::to_string(i++)));
   }
 
   for (auto &future : futures) {
@@ -119,6 +120,6 @@ int ConcurrentDump(const CacheType<K, V> &dest_map,
   return 0;
 }
 
-} // namespace ww
+}  // namespace ww
 
-#endif // CONCURRENT_WARMUP_H
+#endif  // CONCURRENT_WARMUP_H

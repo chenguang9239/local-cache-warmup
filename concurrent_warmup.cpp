@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
 #include <thread>
 
 namespace ww {
@@ -15,7 +16,7 @@ namespace ww {
 static size_t max_size = 1024 * 1024;
 static size_t total_size = max_size * 2;
 
-std::string ErrStr1(int err_no) {
+std::string ErrStr(int err_no) {
   char *e = strerror(errno);
   return e ? e : "no error message";
 }
@@ -45,7 +46,7 @@ struct OutputBuffer {
     cur_pos = 0;
     ptr = (char *)malloc(n);
     if (!ptr) {
-      LOG_ERROR << "malloc " << n << ", error: " << ErrStr1(errno);
+      LOG_ERROR << "malloc " << n << ", error: " << ErrStr(errno);
     }
 
     fd = open(file_name.c_str(), O_CREAT | O_WRONLY);
@@ -55,10 +56,8 @@ struct OutputBuffer {
   }
 
   ~OutputBuffer() {
-    if (ptr)
-      free(ptr);
-    if (fd > 0)
-      close(fd);
+    if (ptr) free(ptr);
+    if (fd > 0) close(fd);
   }
 
   OutputBuffer(OutputBuffer &&other) {
@@ -98,6 +97,8 @@ struct InputBuffer {
   };
 
   InputBuffer(const std::string file_name) {
+    ptr = nullptr;
+    size = 0;
     cur_pos = 0;
     if (0 == access(file_name.c_str(), R_OK)) {
       int fd = open(file_name.c_str(), O_RDONLY);
@@ -106,11 +107,15 @@ struct InputBuffer {
         return;
       }
       size = Size(file_name.c_str());
+      if (size == 0) {
+        LOG_ERROR << "empty file: " << file_name;
+        return;
+      }
       ptr = (char *)mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
       if (ptr) {
         LOG_INFO << "mmap ok, ptr: " << (void *)ptr << ", size: " << size;
       } else {
-        LOG_ERROR << "mmap error: " << ErrStr1(errno);
+        LOG_ERROR << "mmap error: " << ErrStr(errno);
       }
       close(fd);
     }
@@ -121,7 +126,7 @@ struct InputBuffer {
       if (0 == munmap(ptr, size)) {
         LOG_INFO << "munmap ok, ptr: " << (void *)ptr << ", size: " << size;
       } else {
-        LOG_ERROR << "munmap error: " << ErrStr1(errno)
+        LOG_ERROR << "munmap error: " << ErrStr(errno)
                   << ", ptr: " << (void *)ptr << ", size: " << size;
         ;
       }
@@ -160,10 +165,10 @@ struct InputBuffer {
 thread_local OutputBuffer wt_buf;
 thread_local InputBuffer rd_buf;
 
-int Write(const void *buf, size_t bytes, bool immediate) {
+int WriteToBuf(const void *buf, size_t bytes, bool immediate) {
   if (!wt_buf.ptr) {
     if (write(wt_buf.fd, buf, bytes) < 0) {
-      LOG_ERROR << "write error: " << ErrStr1(errno);
+      LOG_ERROR << "write error: " << ErrStr(errno);
       return -1;
     }
     return 0;
@@ -171,7 +176,7 @@ int Write(const void *buf, size_t bytes, bool immediate) {
 
   if (wt_buf.cur_pos >= max_size || (immediate && wt_buf.cur_pos > 0)) {
     if (write(wt_buf.fd, wt_buf.ptr, wt_buf.cur_pos) < 0) {
-      LOG_ERROR << "write error: " << ErrStr1(errno);
+      LOG_ERROR << "write error: " << ErrStr(errno);
       return -1;
     }
     wt_buf.cur_pos = 0;
@@ -183,7 +188,7 @@ int Write(const void *buf, size_t bytes, bool immediate) {
       wt_buf.cur_pos += bytes;
     } else {
       if (write(wt_buf.fd, buf, bytes) < 0) {
-        LOG_ERROR << "write error: " << ErrStr1(errno);
+        LOG_ERROR << "write error: " << ErrStr(errno);
         return -1;
       }
     }
@@ -192,7 +197,7 @@ int Write(const void *buf, size_t bytes, bool immediate) {
   return 0;
 }
 
-int Read(void *target, size_t bytes) {
+int ReadFromBuf(void *target, size_t bytes) {
   if (!rd_buf.ptr) {
     LOG_ERROR << "null read buffer ptr";
     return -2;
@@ -200,7 +205,7 @@ int Read(void *target, size_t bytes) {
 
   size_t new_pos = rd_buf.cur_pos + bytes;
   if (new_pos > rd_buf.size) {
-    return -1; // end
+    return -1;  // end
   }
 
   memcpy(target, rd_buf.ptr + rd_buf.cur_pos, bytes);
@@ -212,9 +217,17 @@ int Read(void *target, size_t bytes) {
 int DoWriteTask(WriteTaskFunc write_task_func, const std::string &file_name) {
   wt_buf = OutputBuffer(file_name, total_size);
 
-  LOG_DEBUG << "buffer addr: " << (void *)wt_buf.ptr
-            << ", write cur pos addr: " << &wt_buf.cur_pos;
-  return write_task_func();
+  LOG_DEBUG << "wt buffer addr: " << (void *)wt_buf.ptr
+            << ", write cur pos addr: " << &wt_buf.cur_pos
+            << ", file name: " << file_name;
+
+  int res0 = write_task_func();
+  int res1 = WriteToBuf(NULL, 0, true);
+
+  if (res0 != 0 || res1 != 0) {
+    return -1;
+  }
+  return 0;
 }
 
 int ReadTask(QuickDeserializeFunc deserialize_func,
@@ -231,7 +244,7 @@ int ReadTask(QuickDeserializeFunc deserialize_func,
 int ConcurrentWarmup(DeserializeFunc deserialize_func,
                      const std::string &file_name, int thread_cnt) {
   if (thread_cnt <= 0) {
-    thread_cnt = std::thread::hardware_concurrency();
+    thread_cnt = 2 * std::thread::hardware_concurrency();
   }
   if (thread_cnt > 100) {
     thread_cnt = 100;
@@ -243,7 +256,7 @@ int ConcurrentWarmup(DeserializeFunc deserialize_func,
   for (int i = 0; i < 1000; ++i) {
     auto split_name = file_name + std::to_string(i);
     if (0 == access(split_name.c_str(), R_OK)) {
-      futures.emplace_back(thread_pool.enqueue(deserialize_func, split_name));
+      futures.emplace_back(thread_pool.push(deserialize_func, split_name));
     } else {
       break;
     }
@@ -259,7 +272,7 @@ int ConcurrentWarmup(DeserializeFunc deserialize_func,
 int ConcurrentWarmup(QuickDeserializeFunc deserialize_func,
                      const std::string &file_name, int thread_cnt) {
   if (thread_cnt <= 0) {
-    thread_cnt = std::thread::hardware_concurrency();
+    thread_cnt = 2 * std::thread::hardware_concurrency();
   }
   if (thread_cnt > 100) {
     thread_cnt = 100;
@@ -272,7 +285,7 @@ int ConcurrentWarmup(QuickDeserializeFunc deserialize_func,
     auto split_name = file_name + std::to_string(i);
     if (0 == access(split_name.c_str(), R_OK)) {
       futures.emplace_back(
-          thread_pool.enqueue(&ReadTask, deserialize_func, split_name));
+          thread_pool.push(&ReadTask, deserialize_func, split_name));
     } else {
       break;
     }
@@ -285,4 +298,4 @@ int ConcurrentWarmup(QuickDeserializeFunc deserialize_func,
   return 0;
 }
 
-} // namespace ww
+}  // namespace ww
