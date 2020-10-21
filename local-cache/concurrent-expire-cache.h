@@ -150,7 +150,7 @@ struct ConcurrentExpireCache {
    */
   void getSnapshot(std::unordered_map<TKey, TValue> &dest_map) {
     HashMap clone(m_map);
-    for (auto itr = m_map.begin(); itr != m_map.end(); ++itr) {
+    for (auto itr = clone.begin(); itr != clone.end(); ++itr) {
       dest_map.insert(std::make_pair(itr->first, itr->second.m_value));
     }
   }
