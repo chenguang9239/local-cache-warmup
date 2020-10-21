@@ -49,7 +49,7 @@ struct OutputBuffer {
       LOG_ERROR << "malloc " << n << ", error: " << ErrStr(errno);
     }
 
-    fd = open(file_name.c_str(), O_CREAT | O_WRONLY);
+    fd = open(file_name.c_str(), O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
     if (fd < 0) {
       LOG_ERROR << "open file error: " << file_name;
     }
