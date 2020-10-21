@@ -113,11 +113,14 @@ int ConcurrentDump(const CacheType<K, V> &dest_map,
                                           file_name + std::to_string(i++)));
   }
 
-  for (auto &future : futures) {
-    future.wait();
+  int res = 0;
+  for (auto& future : futures) {
+    if (future.get() != 0) {
+      res = -1;
+    }
   }
 
-  return 0;
+  return res;
 }
 
 }  // namespace ww

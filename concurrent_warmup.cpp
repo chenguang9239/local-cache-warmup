@@ -262,11 +262,14 @@ int ConcurrentWarmup(DeserializeFunc deserialize_func,
     }
   }
 
-  for (auto &future : futures) {
-    future.wait();
+  int res = 0;
+  for (auto& future : futures) {
+    if (future.get() != 0) {
+      res = -1;
+    }
   }
 
-  return 0;
+  return res;
 }
 
 int ConcurrentWarmup(QuickDeserializeFunc deserialize_func,
@@ -291,11 +294,14 @@ int ConcurrentWarmup(QuickDeserializeFunc deserialize_func,
     }
   }
 
-  for (auto &future : futures) {
-    future.wait();
+  int res = 0;
+  for (auto& future : futures) {
+    if (future.get() != 0) {
+      res = -1;
+    }
   }
 
-  return 0;
+  return res;
 }
 
 }  // namespace ww
