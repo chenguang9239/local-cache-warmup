@@ -114,7 +114,7 @@ int ConcurrentDump(const CacheType<K, V> &dest_map,
   }
 
   int res = 0;
-  for (auto& future : futures) {
+  for (auto &future : futures) {
     if (future.get() != 0) {
       res = -1;
     }

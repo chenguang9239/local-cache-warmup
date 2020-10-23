@@ -162,21 +162,46 @@ struct InputBuffer {
   size_t cur_pos;
 };
 
+size_t WriteN(int fd, const void *vptr, size_t n) {
+  size_t nleft;
+  size_t nwritten;
+  const char *ptr;
+
+  ptr = (const char *)vptr;
+  nleft = n;
+  while (nleft > 0) {
+    if ((nwritten = write(fd, ptr, nleft)) <= 0) {
+      if (nwritten < 0 && errno == EINTR) {
+        nwritten = 0;
+        LOG_ERROR << "EINTR error and call write() again, total bytes: " << n
+                  << ", left: " << nleft;
+      } else {
+        LOG_ERROR << "write error: " << ErrStr(errno) << "total bytes: " << n
+                  << ", left: " << nleft;
+        return (-1);
+      }
+    }
+
+    nleft -= nwritten;
+    ptr += nwritten;
+  }
+
+  return n;
+}
+
 thread_local OutputBuffer wt_buf;
 thread_local InputBuffer rd_buf;
 
 int WriteToBuf(const void *buf, size_t bytes, bool immediate) {
   if (!wt_buf.ptr) {
-    if (write(wt_buf.fd, buf, bytes) < 0) {
-      LOG_ERROR << "write error: " << ErrStr(errno);
+    if (WriteN(wt_buf.fd, buf, bytes) != bytes) {
       return -1;
     }
     return 0;
   }
 
   if (wt_buf.cur_pos >= max_size || (immediate && wt_buf.cur_pos > 0)) {
-    if (write(wt_buf.fd, wt_buf.ptr, wt_buf.cur_pos) < 0) {
-      LOG_ERROR << "write error: " << ErrStr(errno);
+    if (WriteN(wt_buf.fd, wt_buf.ptr, wt_buf.cur_pos) != wt_buf.cur_pos) {
       return -1;
     }
     wt_buf.cur_pos = 0;
@@ -187,8 +212,7 @@ int WriteToBuf(const void *buf, size_t bytes, bool immediate) {
       memcpy(wt_buf.ptr + wt_buf.cur_pos, buf, bytes);
       wt_buf.cur_pos += bytes;
     } else {
-      if (write(wt_buf.fd, buf, bytes) < 0) {
-        LOG_ERROR << "write error: " << ErrStr(errno);
+      if (WriteN(wt_buf.fd, buf, bytes) != bytes) {
         return -1;
       }
     }
@@ -263,7 +287,7 @@ int ConcurrentWarmup(DeserializeFunc deserialize_func,
   }
 
   int res = 0;
-  for (auto& future : futures) {
+  for (auto &future : futures) {
     if (future.get() != 0) {
       res = -1;
     }
@@ -295,7 +319,7 @@ int ConcurrentWarmup(QuickDeserializeFunc deserialize_func,
   }
 
   int res = 0;
-  for (auto& future : futures) {
+  for (auto &future : futures) {
     if (future.get() != 0) {
       res = -1;
     }
