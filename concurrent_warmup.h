@@ -68,21 +68,21 @@ std::vector<CacheType<K, V>> SplitUnMap(const CacheType<K, V> &un_map, int n) {
     return res;
   }
 
-  int i = 1;
   int single_cnt = 1 + un_map.size() / n;
-  if (un_map.size() == n) {
+  if (un_map.size() % n == 0) {
     --single_cnt;
   }
 
+  int i = 0;
   std::unordered_map<K, V> tmp;
   for (auto &entry : un_map) {
     tmp[entry.first] = entry.second;
-    if (i++ % single_cnt == 0) {
+    if (++i % single_cnt == 0) {
       res.emplace_back(std::move(tmp));
     }
   }
 
-  if (i % n != 0) {
+  if (i % single_cnt != 0) {
     res.emplace_back(std::move(tmp));
   }
 
